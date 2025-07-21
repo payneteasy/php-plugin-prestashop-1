@@ -1,0 +1,2 @@
+in admin section "Improve" select "Modules" -> "Module Manager"
+click "Upload a module", select or drag file "payneteasypayment.zip"
