@@ -53,14 +53,12 @@ class PayneteasypaymentConfirmationModuleFrontController extends ModuleFrontCont
 		if (isset($return['status'])) { // METHOD FORM
 			if ($return['status'] == 'declined' || $return['status'] == 'error' || $return['status'] == 'filtered') {
 				$this->module->validateOrder($cart_id, $payment_status_error, $cart->getOrderTotal(), $this->module->displayName, null, array(), $currency_id, false, $secure_key);
-				$order_id = Order::getOrderByCartId((int) $cart->id);
-				$module_id = $this->module->id;
 				Tools::redirect($this->context->link->getModuleLink('payneteasypayment', 'error', ['cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true));
 			}
 
 			if ($return['status'] == 'approved') {
 				$this->module->validateOrder($cart_id, $payment_status_approved, $cart->getOrderTotal(), $this->module->displayName, null, array(), $currency_id, false, $secure_key);
-				$order_id = Order::getOrderByCartId((int) $cart->id);
+				$order_id = $this->orderId($cart);
 				$module_id = $this->module->id;
 				Tools::redirect('index.php?controller=order-confirmation&id_cart=' . $cart_id . '&id_module=' . $module_id . '&id_order=' . $order_id . '&key=' . $secure_key);
 			}
@@ -69,7 +67,7 @@ class PayneteasypaymentConfirmationModuleFrontController extends ModuleFrontCont
 			$data = $this->prepareData($cart);
 			$client   = $this->initClient();
 			$response = $client->status($data, $integration_method, $action_url, $endpoint);
-			$order_id = Order::getOrderByCartId((int) $cart->id);
+			$order_id = $this->orderId($cart);
 			$module_id = $this->module->id;
 
 			if (trim($response["status"]) == 'declined' || trim($response["status"]) == 'error' || trim($response["status"]) == 'filtered') {
@@ -85,6 +83,13 @@ class PayneteasypaymentConfirmationModuleFrontController extends ModuleFrontCont
 				$this->setTemplate('module:payneteasypayment/views/templates/front/3ds.tpl');
 			}
 		}
+	}
+
+	private function orderId($cart) {
+		if (method_exists('Order', 'getOrderByCartId'))
+			return Order::getOrderByCartId((int) $cart->id);
+
+		return Order::getIdByCartId((int) $cart->id);
 	}
 
 	private function signString($s)

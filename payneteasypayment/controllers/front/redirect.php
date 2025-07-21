@@ -26,7 +26,6 @@
 if (!defined('_PS_VERSION_'))
 	exit;
 
-
 include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'classes'.DIRECTORY_SEPARATOR.'Client.php');
 include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'payneteasypayment.php');
 class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontController {
@@ -63,13 +62,13 @@ class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontControll
 		]);
 
 		if (isset($createPayment) && $createPayment['type'] == 'error')
-			Tools::redirectLink($this->context->link->getPageLink('order', null, null, 'step=3'));
+			$this->redirectLink($this->context->link->getPageLink('order', null, null, 'step=3'));
 		elseif (isset($createPayment) && $createPayment['type'] == 'validation-error')
-			Tools::redirectLink($this->context->link->getPageLink('order', null, null, 'step=3'));
+			$this->redirectLink($this->context->link->getPageLink('order', null, null, 'step=3'));
 		else {
 			isset($createPayment['redirect-url'])
-				? Tools::redirectLink($createPayment['redirect-url']) // редирект на платежную форму
-				: Tools::redirectLink($this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true));
+				? $this->redirectLink($createPayment['redirect-url']) // редирект на платежную форму
+				: $this->redirectLink($this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true));
 		}
 
 		if ($cart->id_customer == 0
@@ -102,7 +101,7 @@ class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontControll
 
 	private function prepareData($cart, $card_data) {
 		$address = new Address($cart->id_address_delivery);
-		$orderId = Order::getOrderByCartId($cart->id);
+		$order_id = $this->orderId($cart);
 
 		$currency = new Currency((int)($cart->id_currency));
 		$currency_code = trim($currency->iso_code);
@@ -131,10 +130,10 @@ class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontControll
 			'expire_year' => $card_data['expire_year'],
 			'first_name' => $this->context->customer->firstname,
 			'last_name' => $this->context->customer->lastname,
-			'redirect_success_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $orderId, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
-			'redirect_fail_url' => $this->context->link->getModuleLink('payneteasypayment', 'error', ['order_id' => $orderId, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
-			'redirect_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $orderId, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
-			'server_callback_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $orderId, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
+			'redirect_success_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $order_id, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
+			'redirect_fail_url' => $this->context->link->getModuleLink('payneteasypayment', 'error', ['order_id' => $order_id, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
+			'redirect_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $order_id, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
+			'server_callback_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $order_id, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
 		];
 
 		$data['control'] = $this->signPaymentRequest($data, $endpointId, $merchantControl);
@@ -142,11 +141,25 @@ class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontControll
 		return $data;
 	}
 
+	private function orderId($cart) {
+		if (method_exists('Order', 'getOrderByCartId'))
+			return Order::getOrderByCartId((int) $cart->id);
+
+		return Order::getIdByCartId((int) $cart->id);
+	}
+
+	private function redirectLink($where) {
+		if (method_exists('Tools', 'redirectLink'))
+			Tools::redirectLink($where);
+		else
+			Tools::redirect($where);
+	}
+
 	private function signString($s)
 		{ return sha1($s); }
 
 	private function signPaymentRequest($data, $endpointId, $merchantControl)
-		{ return $this->signString($endpointId .$data['client_orderid'] .(int)($data['amount'] * 100) .$data['email'] .$merchantControl); }
+		{ return $this->signString($endpointId .$data['client_orderid'] .(string)($data['amount'] * 100) .$data['email'] .$merchantControl); }
 
 	private function createPayment($data) {
 		$client = $this->initClient();

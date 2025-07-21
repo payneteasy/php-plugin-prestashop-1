@@ -469,7 +469,7 @@ class Payneteasypayment extends PaymentModule {
 		{ return sha1($s); }
 
 	private function signPaymentRequest($data, $endpointId, $merchantControl)
-		{ return $this->signString($endpointId .$data['client_orderid'] .(int)($data['amount'] * 100) . $data['email'] .$merchantControl); }
+		{ return $this->signString($endpointId .$data['client_orderid'] .(string)($data['amount'] * 100) . $data['email'] .$merchantControl); }
 
 	public function hookDisplayOrderConfirmation(array $params) {
 		if ($this->active == false)
@@ -488,9 +488,16 @@ class Payneteasypayment extends PaymentModule {
 			array(
 				'id_order' => $order->id,
 				'params' => $params,
-				'total' => Tools::displayPrice($order->getOrdersTotalPaid(), $currency, false))
+				'total' => $this->displayPrice($order->getOrdersTotalPaid(), $currency, false))
 		);
 
 		return $this->context->smarty->fetch('module:payneteasypayment/views/templates/hook/displayOrderConfirmation.tpl');
+	}
+
+	private function displayPrice($price, $currency) {
+		if (method_exists('Tools','displayPrice'))
+			return Tools::displayPrice($price, $currency);
+
+		return $this->context->getCurrentLocale()->formatPrice($price, $currency->iso_code);
 	}
 }
