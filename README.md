@@ -1,3 +1,1 @@
-# php-plugin-prestashop-1
-Plugin for prestashop version 1.x.x
-Last test was on version 1.7.18
+# [Documentation in English](https://github.com/annihilatoratm/prestashop9-doc/blob/main/documentation/doc-eng.md)
