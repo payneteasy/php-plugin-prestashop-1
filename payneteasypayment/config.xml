@@ -2,7 +2,7 @@
 <module>
     <name>payneteasypayment</name>
     <displayName><![CDATA[Payneteasy Payment]]></displayName>
-    <version><![CDATA[1.0.0]]></version>
+    <version><![CDATA[1.2]]></version>
     <description><![CDATA[Accept online payments with Payneteasy]]></description>
     <author><![CDATA[R-D]]></author>
     <tab><![CDATA[payments_gateways]]></tab>
