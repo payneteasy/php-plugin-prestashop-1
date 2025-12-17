@@ -26,9 +26,6 @@
 if (!defined('_PS_VERSION_'))
 	exit;
 
-
-include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'classes'.DIRECTORY_SEPARATOR.'Client.php');
-include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'payneteasypayment.php');
 class PayneteasypaymentErrorModuleFrontController extends ModuleFrontController {
 	public function initContent() {
 		parent::initContent();

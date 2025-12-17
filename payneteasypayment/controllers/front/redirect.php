@@ -26,164 +26,80 @@
 if (!defined('_PS_VERSION_'))
 	exit;
 
-include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'classes'.DIRECTORY_SEPARATOR.'Client.php');
 include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'payneteasypayment.php');
 class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontController {
-	public function initContent() {
+	public function initContent(): void {
 		parent::initContent();
 
-		if ($id_cart = Tools::getValue('id_cart')) {
-			$cart = new Cart($id_cart);
+		$Cart = $this->context->cart;
+		$this->module->validateOrder($Cart->id, Payneteasypayment::__STATE_WAITING(), $Cart->getOrderTotal(), $this->module->displayName, null, array(), $Cart->id_currency, false, $Cart->secure_key);
 
-			if (!Validate::isLoadedObject($cart))
-				$cart = $this->context->cart;
-		}
-		else
-			$cart = $this->context->cart;
-		
+		$order_id = method_exists('Order', 'getIdByCartId') ? Order::getIdByCartId($Cart->id) : Order::getOrderByCartId($Cart->id);
 
-		$card_data = [
+		$card = [
 			'cvv2' => Tools::getValue('cvv2'),
-			'expire_year' => (int)Tools::getValue('expire_year'),
-			'expire_month' => preg_replace('/^(\d)$/', '0$1', Tools::getValue('expire_month')),
+			'expire_year' => Tools::getValue('expire_year'),
+			'expire_month' => sprintf('%02d', Tools::getValue('expire_month')),
 			'card_printed_name' => Tools::getValue('card_printed_name'),
-			'credit_card_number' => Tools::getValue('credit_card_number'),
-		];
+			'credit_card_number' => Tools::getValue('credit_card_number') ];
 
-		$data = $this->prepareData($cart, $card_data);
-		$integration_method = Configuration::get('PAYNETEASY_PAYMENT_INTEGRATION_METHOD');
-		$createPayment = $this->createPayment($data);
+		$sale = Payneteasypayment::Api()->sale($this->saleData($order_id, $Cart, $card));
 
 		$db = \Db::getInstance();
 		$result = $db->insert('payneteasy_payments', [
-			'merchant_order_id' => (int) $createPayment['merchant-order-id'],
-			'serial_number' => pSQL($createPayment['serial-number']),
-			'paynet_order_id' => (int) $createPayment['paynet-order-id'],
-		]);
+			'merchant_order_id' => $sale['merchant-order-id'],
+			'serial_number' => pSQL($sale['serial-number']),
+			'paynet_order_id' => $sale['paynet-order-id'] ]);
 
-		if (isset($createPayment) && $createPayment['type'] == 'error')
+		if (isset($sale) && in_array($sale['type'], ['error','validation-error']))
 			$this->redirectLink($this->context->link->getPageLink('order', null, null, 'step=3'));
-		elseif (isset($createPayment) && $createPayment['type'] == 'validation-error')
-			$this->redirectLink($this->context->link->getPageLink('order', null, null, 'step=3'));
-		else {
-			isset($createPayment['redirect-url'])
-				? $this->redirectLink($createPayment['redirect-url']) // редирект на платежную форму
-				: $this->redirectLink($this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true));
-		}
+		else
+			isset($sale['redirect-url'])
+				? $this->redirectLink($sale['redirect-url'])
+				: $this->redirectLink($this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $order_id, 'secure_key' => $Cart->secure_key], true));
 
-		if ($cart->id_customer == 0
-				|| !$this->module->active
-				|| Configuration::get('PAYNETEASY_PAYMENT_ACTIVE_MODE', false) === false)
+		if (!$Cart->id_customer || !$this->module->active)
 			Tools::redirect('index.php?controller=order&step=1');
 	}
 
-	private function prepareDataStatus($cart) {
-		$merchantControl = Configuration::get('PAYNETEASY_PAYMENT_CONTROL_KEY');
-		$endpointId = Configuration::get('PAYNETEASY_PAYMENT_END_POINT');
-		$login = Configuration::get('PAYNETEASY_PAYMENT_LOGIN');
+	private function saleData(int $order_id, Cart $Cart, array $card): array {
+		$Address = new Address($Cart->id_address_delivery);
 
-		$paynet_order_id = Db::getInstance()->getValue(
-			'SELECT paynet_order_id FROM `' . _DB_PREFIX_ . 'payneteasy_payments` WHERE merchant_order_id = ' . $cart->id);
-
+		$_fn_Url = fn($type='confirmation') => $this->context->link->getModuleLink('payneteasypayment', $type, [ 'order_id' => $order_id, 'secure_key' => $Cart->secure_key ], true);
+		
 		$data = [
-			'login' => $login,
-			'client_orderid' => (string)$cart->id,
-			'orderid' => $paynet_order_id,
-		];
-
-		$data['control'] = $this->signStatusRequest($data, $login, $merchantControl);
-
-		return $data;
-	}
-    
-	private function signStatusRequest($requestFields, $login, $merchantControl)
-		{ return $this->signString($login .$requestFields['client_orderid'] .$requestFields['orderid'] .$merchantControl); }
-
-	private function prepareData($cart, $card_data) {
-		$address = new Address($cart->id_address_delivery);
-		$order_id = $this->orderId($cart);
-
-		$currency = new Currency((int)($cart->id_currency));
-		$currency_code = trim($currency->iso_code);
-		$country = Country::getIsoById((int)$address->id_country);
-		$state = $this->getStateIsoById($address->id_state);
-		$merchantControl = Configuration::get('PAYNETEASY_PAYMENT_CONTROL_KEY');
-		$endpointId = Configuration::get('PAYNETEASY_PAYMENT_END_POINT');
-
-		$data = [
-			'client_orderid' => (string)$cart->id,
+			'client_orderid' => $order_id,
 			'order_desc' => $this->module->l('Order on ') . Configuration::get('PS_SHOP_NAME'),
-			'amount' => $cart->getOrderTotal(),
-			'currency' => $currency_code,
-			'address1' => $address->address1,
-			'city' => $address->city,
-			'zip_code' => $address->postcode?$address->postcode:'00000',
-			'country' => $country,
-			'state' => $state,
-			'phone' => $address->phone_mobile?$address->phone_mobile:$address->phone,
+			'amount' => $Cart->getOrderTotal(),
+			'currency' => (new Currency($Cart->id_currency))->iso_code,
+			'address1' => $Address->address1,
+			'city' => $Address->city,
+			'zip_code' => $Address->postcode ? $Address->postcode : '00000',
+			'country' => Country::getIsoById($Address->id_country),
+			'state' => $this->getStateIsoById($Address->id_state),
+			'phone' => $Address->phone_mobile ? $Address->phone_mobile : $Address->phone,
 			'email' => $this->context->customer->email,
 			'ipaddress' => $_SERVER['REMOTE_ADDR'],
-			'cvv2' => $card_data['cvv2'],
-			'credit_card_number' => $card_data['credit_card_number'],
-			'card_printed_name' => $card_data['card_printed_name'],
-			'expire_month' => $card_data['expire_month'],
-			'expire_year' => $card_data['expire_year'],
+			'cvv2' => $card['cvv2'],
+			'credit_card_number' => $card['credit_card_number'],
+			'card_printed_name' => $card['card_printed_name'],
+			'expire_month' => $card['expire_month'],
+			'expire_year' => $card['expire_year'],
 			'first_name' => $this->context->customer->firstname,
 			'last_name' => $this->context->customer->lastname,
-			'redirect_success_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $order_id, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
-			'redirect_fail_url' => $this->context->link->getModuleLink('payneteasypayment', 'error', ['order_id' => $order_id, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
-			'redirect_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $order_id, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
-			'server_callback_url' => $this->context->link->getModuleLink('payneteasypayment', 'confirmation', ['order_id' => $order_id, 'cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true),
-		];
-
-		$data['control'] = $this->signPaymentRequest($data, $endpointId, $merchantControl);
+			'redirect_success_url' => $_fn_Url(),
+			'redirect_fail_url' => $_fn_Url('error'),
+			'redirect_url' => $_fn_Url(),
+			'server_callback_url' => $_fn_Url() ];
 
 		return $data;
 	}
 
-	private function orderId($cart) {
-		if (method_exists('Order', 'getOrderByCartId'))
-			return Order::getOrderByCartId((int) $cart->id);
+	private function redirectLink(string $where): void
+		{ method_exists('Tools', 'redirect') ? Tools::redirect($where) : Tools::redirectLink($where); }
 
-		return Order::getIdByCartId((int) $cart->id);
-	}
-
-	private function redirectLink($where) {
-		if (method_exists('Tools', 'redirectLink'))
-			Tools::redirectLink($where);
-		else
-			Tools::redirect($where);
-	}
-
-	private function signString($s)
-		{ return sha1($s); }
-
-	private function signPaymentRequest($data, $endpointId, $merchantControl)
-		{ return $this->signString($endpointId .$data['client_orderid'] .(string)($data['amount'] * 100) .$data['email'] .$merchantControl); }
-
-	private function createPayment($data) {
-		$client = $this->initClient();
-		$integration_method = Configuration::get('PAYNETEASY_PAYMENT_INTEGRATION_METHOD'); // direct & form
-		$endpoint = Configuration::get('PAYNETEASY_PAYMENT_END_POINT');
-
-		$action_url = Configuration::get('PAYNETEASY_PAYMENT_TEST_MODE')
-			? Configuration::get('PAYNETEASY_PAYMENT_SANDBOX_DOMAIN_CHECKOUT')
-			: Configuration::get('PAYNETEASY_PAYMENT_LIVE_DOMAIN_CHECKOUT');
-
-		return $integration_method == 'direct'
-			? $client->saleDirect($data, $integration_method, $action_url, $endpoint)
-			: $client->saleForm($data, $integration_method, $action_url, $endpoint);
-	}
-
-	private function initClient() {
-		$login = Configuration::get('PAYNETEASY_PAYMENT_LOGIN');
-		$pass = Configuration::get('PAYNETEASY_PAYMENT_CONTROL_KEY');
-		$endpoint = Configuration::get('PAYNETEASY_PAYMENT_END_POINT');
-		$integration_method = Configuration::get('PAYNETEASY_PAYMENT_INTEGRATION_METHOD');
-
-		return new Client($login, $pass, $endpoint, $integration_method);
-	}
-
-		private function getStateIsoById($idState)
-			{ return Db::getInstance()->getValue('SELECT `iso_code` FROM `'._DB_PREFIX_.'state` WHERE `id_state`='.(int)$idState); }
+	private function getStateIsoById(string $idState): string
+		{ return Db::getInstance()->getValue('SELECT `iso_code` FROM `'._DB_PREFIX_.'state` WHERE `id_state`='.(int)$idState); }
 }
+
+?>

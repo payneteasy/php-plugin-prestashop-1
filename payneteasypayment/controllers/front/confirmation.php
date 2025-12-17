@@ -23,106 +23,41 @@
  *  @license   Property of Rus-Design
  */
 
-if (!defined('_PS_VERSION_'))
-	exit;
-
-include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'classes'.DIRECTORY_SEPARATOR.'Client.php');
 include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'payneteasypayment.php');
 class PayneteasypaymentConfirmationModuleFrontController extends ModuleFrontController {
 	public function initContent() {
 		parent::initContent();
-		$cart_id = Tools::getValue('cart_id');
-		$secure_key = Tools::getValue('secure_key');
-		$cart = new Cart((int) $cart_id);
-		$customer = new Customer((int) $cart->id_customer);
 
-		$payment_status_approved = Configuration::get('PS_OS_PAYMENT');
-		$payment_status_error = Configuration::get('PS_OS_ERROR');
-		$payment_status_processing = Configuration::get('PAYNETEASY_PAYMENT_STATE_WAITING');
-		$currency_id = (int) Context::getContext()->currency->id;
+		$Order = new Order( Tools::getValue('order_id') );
+		$Cart = Cart::getCartByOrderId($Order->id);
 
-		$integration_method = Configuration::get('PAYNETEASY_PAYMENT_INTEGRATION_METHOD');
-		$endpoint = Configuration::get('PAYNETEASY_PAYMENT_END_POINT');
+		if (!$Cart->secure_key || Tools::getValue('secure_key') != $Cart->secure_key)
+			throw new Exception('Invalid secure key');
 
-		$action_url = Configuration::get('PAYNETEASY_PAYMENT_TEST_MODE')
-			? Configuration::get('PAYNETEASY_PAYMENT_SANDBOX_DOMAIN_CHECKOUT')
-			: Configuration::get('PAYNETEASY_PAYMENT_LIVE_DOMAIN_CHECKOUT');
+		$result = Tools::getAllValues();
 
-		$return = Tools::getAllValues();
+		if (!isset($result['status']))
+			$result = Payneteasypayment::Api()->status([
+				'client_orderid' => $Order->id,
+				'orderid' => Db::getInstance()->getValue('SELECT paynet_order_id FROM `' ._DB_PREFIX_."payneteasy_payments` WHERE merchant_order_id={$Order->id}") ]);
 
-		if (isset($return['status'])) { // METHOD FORM
-			if ($return['status'] == 'declined' || $return['status'] == 'error' || $return['status'] == 'filtered') {
-				$this->module->validateOrder($cart_id, $payment_status_error, $cart->getOrderTotal(), $this->module->displayName, null, array(), $currency_id, false, $secure_key);
-				Tools::redirect($this->context->link->getModuleLink('payneteasypayment', 'error', ['cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true));
-			}
-
-			if ($return['status'] == 'approved') {
-				$this->module->validateOrder($cart_id, $payment_status_approved, $cart->getOrderTotal(), $this->module->displayName, null, array(), $currency_id, false, $secure_key);
-				$order_id = $this->orderId($cart);
-				$module_id = $this->module->id;
-				Tools::redirect('index.php?controller=order-confirmation&id_cart=' . $cart_id . '&id_module=' . $module_id . '&id_order=' . $order_id . '&key=' . $secure_key);
-			}
+		if ($result['status'] == 'approved') {
+			$Order->setCurrentState( Configuration::get('PS_OS_PAYMENT') );
+			Tools::redirect("index.php?controller=order-confirmation&id_cart={$Cart->id}&id_module={$this->module->id}&id_order={$Order->id}&key={$Cart->secure_key}");
 		}
-		else { // METHOD DIRECT
-			$data = $this->prepareData($cart);
-			$client   = $this->initClient();
-			$response = $client->status($data, $integration_method, $action_url, $endpoint);
-			$order_id = $this->orderId($cart);
-			$module_id = $this->module->id;
-
-			if (trim($response["status"]) == 'declined' || trim($response["status"]) == 'error' || trim($response["status"]) == 'filtered') {
-				$this->module->validateOrder($cart_id, $payment_status_error, $cart->getOrderTotal(), $this->module->displayName, null, array(), $currency_id, false, $secure_key);
-				Tools::redirect($this->context->link->getModuleLink('payneteasypayment', 'error', ['cart_id'=>$cart->id, 'secure_key'=>$cart->secure_key], true));
+		elseif ($result['status'] == 'processing') {
+			if (isset($result['html'])) {
+				$this->context->smarty->assign([ 'PROCESSINGHTML' => $result['html'] ]);
+				$this->setTemplate('module:payneteasypayment/views/templates/front/processing.tpl');
 			}
-			elseif (trim($response["status"]) == 'approved') {
-				$this->module->validateOrder($cart_id, $payment_status_approved, $cart->getOrderTotal(), $this->module->displayName, null, array(), $currency_id, false, $secure_key);
-				Tools::redirect('index.php?controller=order-confirmation&id_cart=' . $cart_id . '&id_module=' . $module_id . '&id_order=' . $order_id . '&key=' . $secure_key);
-			}
-			else {
-				echo $response['html'];
+			else
 				$this->setTemplate('module:payneteasypayment/views/templates/front/3ds.tpl');
-			}
 		}
-	}
-
-	private function orderId($cart) {
-		if (method_exists('Order', 'getOrderByCartId'))
-			return Order::getOrderByCartId((int) $cart->id);
-
-		return Order::getIdByCartId((int) $cart->id);
-	}
-
-	private function signString($s)
-		{ return sha1($s); }
-
-	private function signStatusRequest($requestFields, $login, $merchantControl)
-		{ return $this->signString($login .$requestFields['client_orderid'] .$requestFields['orderid'] .$merchantControl); }
-
-	private function initClient() {
-		$login = Configuration::get('PAYNETEASY_PAYMENT_LOGIN');
-		$pass = Configuration::get('PAYNETEASY_PAYMENT_CONTROL_KEY');
-		$endpoint = Configuration::get('PAYNETEASY_PAYMENT_END_POINT');
-		$integration_method = Configuration::get('PAYNETEASY_PAYMENT_INTEGRATION_METHOD');
-
-		return new Client($login, $pass, $endpoint, $integration_method);
-	}
-
-	private function prepareData($cart) {
-		$merchantControl = Configuration::get('PAYNETEASY_PAYMENT_CONTROL_KEY');
-		$endpointId = Configuration::get('PAYNETEASY_PAYMENT_END_POINT');
-		$login = Configuration::get('PAYNETEASY_PAYMENT_LOGIN');
-
-		$paynet_order_id = Db::getInstance()->getValue(
-			'SELECT paynet_order_id FROM `'._DB_PREFIX_.'payneteasy_payments` WHERE merchant_order_id = '.$cart->id);
-
-		$data = [
-			'login' => $login,
-			'client_orderid' => (string)$cart->id,
-			'orderid' => $paynet_order_id
-		];
-
-		$data['control'] = $this->signStatusRequest($data, $login, $merchantControl);
-
-		return $data;
+		else { # declined / error / filtered / unknown
+			$Order->setCurrentState( Configuration::get('PS_OS_ERROR') );
+			Tools::redirect($this->context->link->getModuleLink('payneteasypayment', 'error', [ 'cart_id' => $Cart->id, 'secure_key' => $Cart->secure_key], true));
+		}
 	}
 }
+
+?>
