@@ -1,27 +1,9 @@
 <?php
 /**
-* 2007-2024 PrestaShop
-*
-* NOTICE OF LICENSE
-*
-* This source file is subject to the Academic Free License (AFL 3.0)
-* that is bundled with this package in the file LICENSE.txt.
-* It is also available through the world-wide-web at this URL:
-* http://opensource.org/licenses/afl-3.0.php
-* If you did not receive a copy of the license and are unable to
-* obtain it through the world-wide-web, please send an email
-* to license@prestashop.com so we can send you a copy immediately.
-*
-* DISCLAIMER
-*
-* Do not edit or add to this file if you wish to upgrade PrestaShop to newer
-* versions in the future. If you wish to customize PrestaShop for your
-* needs please refer to http://www.prestashop.com for more information.
-*
-*  @author    R-D <info@rus-design.com>
-*  @copyright 2007-2024 Rus-Design
-*  @license   Property of Rus-Design
-*/
+ *  @author    Payneteasy
+ *  @copyright 2007-2026 Payneteasy
+ *  @license   Property of Payneteasy
+ */
 
 if (!defined('_PS_VERSION_'))
 	exit;
@@ -32,6 +14,9 @@ class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontControll
 		parent::initContent();
 
 		$Cart = $this->context->cart;
+		if (!$Cart->id)
+			Tools::redirect('index.php?controller=order&step=1');
+
 		$this->module->validateOrder($Cart->id, Payneteasypayment::__STATE_WAITING(), $Cart->getOrderTotal(), $this->module->displayName, null, array(), $Cart->id_currency, false, $Cart->secure_key);
 
 		$order_id = method_exists('Order', 'getIdByCartId') ? Order::getIdByCartId($Cart->id) : Order::getOrderByCartId($Cart->id);
@@ -43,7 +28,13 @@ class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontControll
 			'card_printed_name' => Tools::getValue('card_printed_name'),
 			'credit_card_number' => Tools::getValue('credit_card_number') ];
 
-		$sale = Payneteasypayment::Api()->sale($this->saleData($order_id, $Cart, $card));
+		try
+			{ $sale = Payneteasypayment::Api()->sale($this->saleData($order_id, $Cart, $card)); }
+		catch (\Exception $E) {
+			(new Order($order_id))->setCurrentState(Configuration::get('PS_OS_ERROR'));
+			Tools::redirect($this->context->link->getModuleLink('payneteasypayment', 'error'));
+			die;
+		}
 
 		$db = \Db::getInstance();
 		$result = $db->insert('payneteasy_payments', [

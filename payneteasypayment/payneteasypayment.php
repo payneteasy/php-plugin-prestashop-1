@@ -1,63 +1,69 @@
 <?php
 /**
-* 2007-2024 PrestaShop
-*
-* NOTICE OF LICENSE
-*
-* This source file is subject to the Academic Free License (AFL 3.0)
-* that is bundled with this package in the file LICENSE.txt.
-* It is also available through the world-wide-web at this URL:
-* http://opensource.org/licenses/afl-3.0.php
-* If you did not receive a copy of the license and are unable to
-* obtain it through the world-wide-web, please send an email
-* to license@prestashop.com so we can send you a copy immediately.
-*
-* DISCLAIMER
-*
-* Do not edit or add to this file if you wish to upgrade PrestaShop to newer
-* versions in the future. If you wish to customize PrestaShop for your
-* needs please refer to http://www.prestashop.com for more information.
-*
-*  @author    R-D <info@rus-design.com>
-*  @copyright 2007-2024 Rus-Design
-*  @license   Property of Rus-Design
-*/
+ *  @author    Payneteasy
+ *  @copyright 2007-2026 Payneteasy
+ *  @license   Property of Payneteasy
+ */
 
 if (!defined('_PS_VERSION_'))
 	exit;
 
 use PrestaShop\PrestaShop\Core\Payment\PaymentOption;
-#include_once(_PS_MODULE_DIR_.'payneteasypayment'.DIRECTORY_SEPARATOR.'lib'.DIRECTORY_SEPARATOR.'Api.php');
 include_once('lib'.DIRECTORY_SEPARATOR.'Api.php');
 
 use Payneteasy\lib;
 class Payneteasypayment extends PaymentModule {
 	private const _CFG = 'PAYNETEASY_PAYMENT_';
-	private const _CFG_KEYS = [ 'END_POINT','LOGIN','CONTROL_KEY','LIVE_DOMAIN_CHECKOUT','INTEGRATION_METHOD','SANDBOX_DOMAIN_CHECKOUT','TEST_MODE','CANCEL_STATE' ];
+	private const _CFG_KEYS = [ 'END_POINT','LOGIN','CONTROL_KEY','LIVE_DOMAIN_CHECKOUT','INTEGRATION_METHOD','SANDBOX_DOMAIN_CHECKOUT','TEST_MODE','CANCEL_STATE', 'GITHUB_VERSION_CHECK' ];
 	private const _CFG_KEYS_HIDDEN = [ 'STATE_WAITING' ];
+
+	private const GITHUB_REPO = 'payneteasy/php-plugin-prestashop-1';
 
 	private static $_Api, $_cfg;
 
 	public function __construct() {
 		$this->name = 'payneteasypayment';
 		$this->tab = 'payments_gateways';
-		$this->version = '1.2';
-		$this->author = 'R-D';
-		$this->need_instance = 0;
-		$this->bootstrap = true;
+		$this->version = '1.3';
+		$this->author = 'Payneteasy';
 		$this->module_key = '';
 		$this->_postErrors = [];
+		$this->ps_versions_compliancy = [ 'min' => '1.7.0.0', 'max' => '9.0.2' ];
+		$this->bootstrap = true;
 
 		parent::__construct();
 
 		$this->displayName = $this->l('Payneteasy Payment');
-		$this->description = $this->l('Accept online payments with Payneteasy');
-		$this->ps_versions_compliancy = [ 'min' => '1.7.0.0', 'max' => _PS_VERSION_ ];
+		$this->description = $this->l('Accept card for online payment with Payneteasy');
+		$this->confirmUninstall = $this->l('Are you sure you want to uninstall plugin?');
+
+		if (!is_null(Context::getContext()->controller) && Context::getContext()->controller->controller_type == 'admin') {
+			if (!self::Api()->is_configured())
+				$this->warning = 'Configuring is required. ';
+
+			if (($stored = self::__GITHUB_VERSION_CHECK()) != ($current = $this->version.' '.($current_date = date('Y-m-d')))) {
+				[ $stored_ver, $stored_date ] = explode(' ', $stored ?: '0 0');
+
+				if ($stored_date != $current_date) { # fetch & store once per day
+					try {
+						$stored_ver = self::Api()->fetch_github_version(self::GITHUB_REPO);
+						self::GITHUB_VERSION_CHECK("$stored_ver $current_date");
+					}
+					catch (Exception $E) {
+						$this->warning .= $E->getMessage().', check server error log. ';
+						$stored_ver = $this->version;
+					}
+				}
+
+				if (strcmp($stored_ver, $this->version))
+					$this->warning .= 'New version is available for download';
+			}
+		}
 	}
 
 	# service config access wrap
-	# returns config entry expanded (with prefix) name, value, or sets it
-	# silently removes prefix (i.e. "PAYNETEASY_PAYMENT_") from name (useful for loops)
+	# returns config entry expanded (i.e. with prefix) name, value, or sets it
+	# silently removes prefix from name (useful for loops)
 	# self::LOGIN() - returns "LOGIN"'s name -> "PAYNETEASY_PAYMENT_LOGIN"
 	# self::__LOGIN() - return "LOGIN"'s value
 	# self::LOGIN($newval) - sets "LOGIN"'s value
@@ -134,8 +140,8 @@ class Payneteasypayment extends PaymentModule {
 			) ENGINE=' ._MYSQL_ENGINE_ .' DEFAULT CHARSET=utf8');
         
 		return parent::install()
-			&& $this->registerHook('actionOrderStatusPostUpdate')
 			&& $this->registerHook('paymentOptions')
+			&& $this->registerHook('actionOrderStatusPostUpdate')
 			&& $this->registerHook('displayOrderConfirmation')
 			&& $this->registerHook('displayPaymentReturn');
 	}
@@ -149,8 +155,9 @@ class Payneteasypayment extends PaymentModule {
 			Configuration::deleteByName(self::_CFG.$key);
 
 		return $this->unregisterHook('paymentOptions')
-			&& $this->unregisterHook('displayPaymentReturn')
 			&& $this->unregisterHook('actionOrderStatusPostUpdate')
+			&& $this->unregisterHook('displayOrderConfirmation')
+			&& $this->unregisterHook('displayPaymentReturn')
 			&& parent::uninstall();
 	}
     
@@ -268,7 +275,7 @@ class Payneteasypayment extends PaymentModule {
 			[$url1, $url2, $login, $ckey, $endpoint ] = array_map(
 					function($key){ return Tools::getValue(self::__callStatic($key)); },
 					[ 'LIVE_DOMAIN_CHECKOUT','SANDBOX_DOMAIN_CHECKOUT','LOGIN','CONTROL_KEY','END_POINT' ]);
-			if ($errors = Payneteasy\lib\Api::check_config_input($url1, $url2, $login, $ckey, $endpoint))
+			if ($errors = self::Api()->check_config_input($url1, $url2, $login, $ckey, $endpoint))
 				array_push($this->_postErrors, $errors);
 		}
 	}
