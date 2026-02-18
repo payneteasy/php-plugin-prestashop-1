@@ -1,4 +1,9 @@
 <?php
+/**
+ *  @author    Payneteasy
+ *  @copyright 2007-2026 Payneteasy
+ *  @license   Property of Payneteasy
+ */
 
 namespace Payneteasy\lib;
 
@@ -8,13 +13,25 @@ if (!defined('_PS_VERSION_'))
 class ApiException extends \Exception {
 	private array $context = [];
 
-	public function __construct(string $message, array $context = [], int $code = 0, \Throwable $previous = null) {
-		$this->context = $context;
+	public function __construct(string $message, array $in_out = [], int $code = 0, \Throwable $previous = null) {
 		parent::__construct($message, $code, $previous);
-	}
 
-	public function getContext(): array
-		{ return $this->context; }
+		error_log($this->message.' in '.$this->file.':'.$this->line);
+
+		if ($in = array_shift($in_out)) {
+			ksort($in);
+			foreach ($in as $key => $value)
+				error_log(" -> '$key' => '$value'");
+
+			if ($out = array_shift($in_out)) {
+				error_log('');
+
+				ksort($out);
+				foreach ($out as $key => $value)
+					error_log(" <- '$key' => '$value'");
+			}
+		}
+	}
 }
 
 ?>
