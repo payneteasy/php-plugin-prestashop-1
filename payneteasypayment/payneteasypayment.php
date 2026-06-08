@@ -9,25 +9,28 @@ if (!defined('_PS_VERSION_'))
 	exit;
 
 use PrestaShop\PrestaShop\Core\Payment\PaymentOption;
-include_once('lib'.DIRECTORY_SEPARATOR.'Api.php');
 
+define('_PAYNETEASY_LIB_', true);
+include_once('lib'.DIRECTORY_SEPARATOR.'Api.php');
 use Payneteasy\lib;
+
 class Payneteasypayment extends PaymentModule {
 	private const _CFG = 'PAYNETEASY_PAYMENT_';
-	private const _CFG_KEYS = [ 'END_POINT','LOGIN','CONTROL_KEY','LIVE_DOMAIN_CHECKOUT','INTEGRATION_METHOD','SANDBOX_DOMAIN_CHECKOUT','TEST_MODE','CANCEL_STATE', 'GITHUB_VERSION_CHECK' ];
+	private const _CFG_KEYS = [ 'END_POINT','LOGIN','CONTROL_KEY','IS_MULTICURR','LIVE_DOMAIN_CHECKOUT','INTEGRATION_METHOD','SANDBOX_DOMAIN_CHECKOUT','IS_SANDBOX','CANCEL_STATE',
+		'GITHUB_VERSION_CHECK','DEBUG_TRACE','DEBUG_FAKE' ];
 	private const _CFG_KEYS_HIDDEN = [ 'STATE_WAITING' ];
-
-	private const GITHUB_REPO = 'payneteasy/php-plugin-prestashop-1';
+	private const REPO = 'payneteasy/php-plugin-prestashop-1';
 
 	private static $_Api, $_cfg;
+
+	private array $_postErrors = [];
 
 	public function __construct() {
 		$this->name = 'payneteasypayment';
 		$this->tab = 'payments_gateways';
-		$this->version = '1.3';
+		$this->version = '1.4';
 		$this->author = 'Payneteasy';
 		$this->module_key = '';
-		$this->_postErrors = [];
 		$this->ps_versions_compliancy = [ 'min' => '1.7.0.0', 'max' => '9.0.2' ];
 		$this->bootstrap = true;
 
@@ -37,33 +40,18 @@ class Payneteasypayment extends PaymentModule {
 		$this->description = $this->l('Accept card for online payment with Payneteasy');
 		$this->confirmUninstall = $this->l('Are you sure you want to uninstall plugin?');
 
-		if (!is_null(Context::getContext()->controller) && Context::getContext()->controller->controller_type == 'admin') {
-			if (!self::Api()->is_configured())
-				$this->warning = 'Configuring is required. ';
-
-			if (($stored = self::__GITHUB_VERSION_CHECK()) != ($current = $this->version.' '.($current_date = date('Y-m-d')))) {
-				[ $stored_ver, $stored_date ] = explode(' ', $stored ?: '0 0');
-
-				if ($stored_date != $current_date) { # fetch & store once per day
-					try {
-						$stored_ver = self::Api()->fetch_github_version(self::GITHUB_REPO);
-						self::GITHUB_VERSION_CHECK("$stored_ver $current_date");
-					}
-					catch (Exception $E) {
-						$this->warning .= $E->getMessage().', check server error log. ';
-						$stored_ver = $this->version;
-					}
-				}
-
-				if (strcmp($stored_ver, $this->version))
-					$this->warning .= 'New version is available for download';
-			}
+		try {
+			if (@Context::getContext()->controller->controller_type == 'admin'
+					&& Payneteasy\lib\Api::got_upgrade(self::REPO, $this->version, self::__GITHUB_VERSION_CHECK(), fn($upd) => self::GITHUB_VERSION_CHECK($upd)))
+				$this->warning = 'New version is available for download.';
 		}
+		catch (Payneteasy\lib\ApiException $E)
+			{ $this->warning = $E->getMessage().', check server error log.'; }
 	}
 
 	# service config access wrap
-	# returns config entry expanded (i.e. with prefix) name, value, or sets it
-	# silently removes prefix from name (useful for loops)
+	# returns config entry expanded (with prefix) name, value, or sets it
+	# silently removes prefix (i.e. "PAYNETEASY_PAYMENT_") from name (useful for loops)
 	# self::LOGIN() - returns "LOGIN"'s name -> "PAYNETEASY_PAYMENT_LOGIN"
 	# self::__LOGIN() - return "LOGIN"'s value
 	# self::LOGIN($newval) - sets "LOGIN"'s value
@@ -85,17 +73,16 @@ class Payneteasypayment extends PaymentModule {
 		return $want_value ? self::$_cfg[$key] : self::_CFG.$key;
 	}
 
-	private static function _load_config(): void
-		{ self::LOGIN(); }
-
 	public static function Api() {
 		if (!isset(self::$_Api)) {
 			self::$_Api = new Payneteasy\lib\Api(
-				self::__TEST_MODE() ? self::__SANDBOX_DOMAIN_CHECKOUT() : self::__LIVE_DOMAIN_CHECKOUT(),
+				self::__IS_SANDBOX() ? self::__SANDBOX_DOMAIN_CHECKOUT() : self::__LIVE_DOMAIN_CHECKOUT(),
 				self::__LOGIN(),
 				self::__CONTROL_KEY(),
 				self::__END_POINT(),
-				self::__INTEGRATION_METHOD() == 'direct');
+				self::__INTEGRATION_METHOD() == 'direct',
+				self::__IS_MULTICURR() == 1,
+				self::__DEBUG_TRACE() + self::__DEBUG_FAKE());
 		}
 
 		return self::$_Api;
@@ -124,10 +111,13 @@ class Payneteasypayment extends PaymentModule {
 		$OrderState->save();
 
 		self::STATE_WAITING($OrderState->id);
-		self::LIVE_DOMAIN_CHECKOUT('https://gate.payneteasy.com/');
-		self::SANDBOX_DOMAIN_CHECKOUT('https://sandbox.payneteasy.com/');
 
-		copy(_PS_MODULE_DIR_ .'payneteasypayment/views/img/logo.gif', _PS_IMG_DIR_ ."os/{$OrderState->id}.gif");
+		if (Payneteasy\lib\Api::is_debug_mode()) {
+			self::LIVE_DOMAIN_CHECKOUT('https://gate.payneteasy.com/');
+			self::SANDBOX_DOMAIN_CHECKOUT('https://sandbox.payneteasy.com/');
+		}
+
+		copy(_PS_MODULE_DIR_ .'payneteasypayment/views/img/status-pending.gif', _PS_IMG_DIR_ ."os/{$OrderState->id}.gif");
 
 		Db::getInstance()->Execute('
 			CREATE TABLE IF NOT EXISTS `' ._DB_PREFIX_ .'payneteasy_payments` (
@@ -210,25 +200,25 @@ class Payneteasypayment extends PaymentModule {
 		$default_order_state = [[ 'id_order_state' => '0', 'name' => $this->l('Select')]];
 		$orderStates = array_merge($default_order_state, $orderStates);
 
-		return [
+		$arr = [
 			'form' => [
 				'legend' => [ 'title' => $this->l('Settings'), 'icon' => 'icon-cogs' ],
 				'input' => [
 					[ 'type' => 'text',
 						'label' => $this->l('Gateway url (LIVE)'),
 						'name' => self::LIVE_DOMAIN_CHECKOUT(),
-						'desc' => $this->l('https://gate.payneteasy.com/ etc.') ],
+						'desc' => $this->l('e.g. https://gate.payneteasy.com/') ],
 					[ 'type' => 'text',
 						'label' => $this->l('Gateway url (SANDBOX)'),
 						'name' => self::SANDBOX_DOMAIN_CHECKOUT(),
-						'desc' => $this->l('https://sandbox.payneteasy.com/ etc.') ],
+						'desc' => $this->l('e.g. https://sandbox.payneteasy.com/') ],
 					[ 'type' => 'switch',
 						'label' => $this->l('Sandbox mode'),
-						'name' => self::TEST_MODE(),
+						'name' => self::IS_SANDBOX(),
 						'desc' => $this->l('Test mode ON or OFF'),
 						'values' => [
-								[ 'id' => 'test_on', 'value' => 1, 'label' => $this->l('Test') ],
-								[ 'id' => 'test_off', 'value' => 0, 'label' => $this->l('Live') ] ] ],
+								[ 'id' => 'sandbox_on', 'value' => 1, 'label' => $this->l('Sandbox') ],
+								[ 'id' => 'sandbox_off', 'value' => 0, 'label' => $this->l('Live') ] ] ],
 					[ 'type' => 'select',
 						'label' => $this->l('Integration method'),
 						'name' => self::INTEGRATION_METHOD(),
@@ -238,13 +228,20 @@ class Payneteasypayment extends PaymentModule {
 							'name' => 'name',
 							'id' => 'id',
 							'query' => [
-								['id' => 'direct', 'name' => $this->l('DIRECT') ],
-								['id' => 'form', 'name' => $this->l('FORM') ] ] ] ],
+								[ 'id' => 'direct', 'name' => $this->l('DIRECT') ],
+								[ 'id' => 'form', 'name' => $this->l('FORM') ] ] ] ],
 					[ 'type' => 'text',
-						'label' => $this->l('End point ID'),
+						'label' => $this->l('End point Id'),
 						'name' => self::END_POINT(),
-						'desc' => $this->l('End point ID (for single currency integration)'),
+						'desc' => $this->l('End point Id'),
 						'required' => true ],
+					[ 'type' => 'switch',
+						'label' => $this->l('Multiple currencies'),
+						'name' => self::IS_MULTICURR(),
+						'desc' => $this->l('End point Id supports multiple currencies'),
+						'values' => [
+								[ 'id' => 'multicurr_on', 'value' => 1, 'label' => $this->l('On') ],
+								[ 'id' => 'multicurr_off', 'value' => 0, 'label' => $this->l('Off') ] ] ],
 					[ 'type' => 'text',
 						'label' => $this->l('Login'),
 						'name' => self::LOGIN(),
@@ -263,19 +260,39 @@ class Payneteasypayment extends PaymentModule {
 							'id' => 'id_order_state',
 							'query' => $orderStates ] ] ], 
 				'submit' => [ 'title' => $this->l('Save') ]  ] ];
+
+			if (Payneteasy\lib\Api::is_debug_mode()) {
+				array_push($arr['form']['input'],
+					[ 'type' => 'switch',
+						'label' => $this->l('DEBUG: Trace requests'),
+						'name' => self::DEBUG_TRACE(),
+						'desc' => $this->l('Debug flag: write requests and responses trace to server errorlog'),
+						'values' => [
+								[ 'id' => 'trace_on', 'value' => Payneteasy\lib\Api::DEBUG_TRACE_REQUESTS, 'label' => $this->l('On') ],
+								[ 'id' => 'trace_off', 'value' => 0, 'label' => $this->l('Off') ] ] ],
+					[ 'type' => 'switch',
+						'label' => $this->l('DEBUG: Fake requests'),
+						'name' => self::DEBUG_FAKE(),
+						'desc' => $this->l('Debug flag: imitate server requests and responses (countermands responses trace)'),
+						'values' => [
+								[ 'id' => 'fake_on', 'value' => Payneteasy\lib\Api::DEBUG_FAKE_REQUESTS, 'label' => $this->l('On') ],
+								[ 'id' => 'fake_off', 'value' => 0, 'label' => $this->l('Off') ] ] ]);
+			}
+
+			return $arr;
 	}
 
 	public function getConfigFieldsValues(): array {
-		self::_load_config();
+		self::LOGIN(); # to force load config
 		return array_reduce(array_map(fn($k) => [ self::_CFG.$k => self::$_cfg[$k] ], self::_CFG_KEYS), 'array_merge', []);
 	}
 
-	protected function _postValidation() { # TODO regexps
+	protected function _postValidation() {
 		if (Tools::isSubmit('submitPayneteasypaymentModule')) {
-			[$url1, $url2, $login, $ckey, $endpoint ] = array_map(
+			[ $url1, $url2, $login, $ckey, $endpoint ] = array_map(
 					function($key){ return Tools::getValue(self::__callStatic($key)); },
 					[ 'LIVE_DOMAIN_CHECKOUT','SANDBOX_DOMAIN_CHECKOUT','LOGIN','CONTROL_KEY','END_POINT' ]);
-			if ($errors = self::Api()->check_config_input($url1, $url2, $login, $ckey, $endpoint))
+			if ($errors = Payneteasy\lib\Api::check_config_input($url1, $url2, $login, $ckey, $endpoint))
 				array_push($this->_postErrors, $errors);
 		}
 	}
@@ -305,20 +322,19 @@ class Payneteasypayment extends PaymentModule {
 	}
 
 	private function _generateEmbeddedForm() {
-		[ $card_number_value, $printed_name_value, $expiry_month_value, $expiry_year_value, $cvv2_value ]
-			= self::__TEST_MODE()
-				? [4444555566661111, 'Test Name', 12, date('Y')+2, 123]
-				: ['', '', '', '', ''];
+		[ $cc, $cvv, $year, $mon, $name ] = self::__IS_SANDBOX()
+			? [ 4444_5555_6666_1111, 123, date('Y')+2, 12, 'Test Name' ]
+			: [ '', '', '', '', '' ];
 
 		$this->context->smarty->assign([
-			'card_number_value'     => $card_number_value,
-			'printed_name_value'    => $printed_name_value,
-			'expiry_month_value'    => $expiry_month_value,
-			'expiry_year_value'     => $expiry_year_value,
-			'cvv2_value'            => $cvv2_value,
-			'cvv_image'             => Media::getMediaPath( _PS_MODULE_DIR_ ."{$this->name}/views/img/cvv-caption_new.png")]);
+			'card_number_value'     => $cc,
+			'cvv2_value'            => $cvv,
+			'expiry_year_value'     => $year,
+			'expiry_month_value'    => $mon,
+			'printed_name_value'    => $name,
+			'cvv_image'             => Media::getMediaPath( _PS_MODULE_DIR_ ."{$this->name}/views/img/cvv-image.png")]);
 
-		$this->context->smarty->assign([ 'action' => $this->context->link->getModuleLink($this->name, 'redirect', ['option' => 'embedded'], true) ]);
+		$this->context->smarty->assign([ 'action' => $this->context->link->getModuleLink($this->name, 'redirect', [ 'option' => 'embedded' ], true) ]);
 
 		return $this->context->smarty->fetch('module:payneteasypayment/views/templates/front/paymentOptionEmbeddedForm.tpl');
 	}

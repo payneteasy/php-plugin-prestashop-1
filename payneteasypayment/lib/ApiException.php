@@ -5,33 +5,26 @@
  *  @license   Property of Payneteasy
  */
 
+declare(strict_types=1);
+
 namespace Payneteasy\lib;
 
-if (!defined('_PS_VERSION_'))
-  exit;
+defined('_PAYNETEASY_LIB_') or die('Restricted access');
 
 class ApiException extends \Exception {
 	private array $context = [];
 
-	public function __construct(string $message, array $in_out = [], int $code = 0, \Throwable $previous = null) {
+	public function __construct(string $message, mixed $a1=null, mixed $a2=null, int $code=0, \Throwable $previous=null) {
 		parent::__construct($message, $code, $previous);
 
 		error_log($this->message.' in '.$this->file.':'.$this->line);
 
-		if ($in = array_shift($in_out)) {
-			ksort($in);
-			foreach ($in as $key => $value)
-				error_log(" -> '$key' => '$value'");
+		if (isset($a1)) {
+			trace($a1, isset($a2) ? ' --> ' : ' -- ');
 
-			if ($out = array_shift($in_out)) {
-				error_log('');
-
-				ksort($out);
-				foreach ($out as $key => $value)
-					error_log(" <- '$key' => '$value'");
+			if (isset($a2)) {
+				trace($a2, ' <-- ');
 			}
 		}
 	}
 }
-
-?>
