@@ -28,7 +28,7 @@ class Payneteasypayment extends PaymentModule {
 	public function __construct() {
 		$this->name = 'payneteasypayment';
 		$this->tab = 'payments_gateways';
-		$this->version = '1.4';
+		$this->version = '1.4.1';
 		$this->author = 'Payneteasy';
 		$this->module_key = '';
 		$this->ps_versions_compliancy = [ 'min' => '1.7.0.0', 'max' => '9.0.2' ];
@@ -116,6 +116,9 @@ class Payneteasypayment extends PaymentModule {
 			self::LIVE_DOMAIN_CHECKOUT('https://gate.payneteasy.com/');
 			self::SANDBOX_DOMAIN_CHECKOUT('https://sandbox.payneteasy.com/');
 		}
+
+		self::DEBUG_TRACE(0);
+		self::DEBUG_FAKE(0);
 
 		copy(_PS_MODULE_DIR_ .'payneteasypayment/views/img/status-pending.gif', _PS_IMG_DIR_ ."os/{$OrderState->id}.gif");
 

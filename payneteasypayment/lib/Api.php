@@ -86,9 +86,9 @@ class Api {
 		return array_reduce([
 			[ 'Gateway URL', $gate, '|^https?://(?:\\w+(?:-\\w+)*\\.)+\\w+/$|' ],
 			[ 'Sandbox URL', $sandbox, '|^https?://(?:\\w+(?:-\\w+)*\\.)+\\w+/$|' ],
+			[ 'End point Id', $endpoint, '/^\d+$/' ],
 			[ 'Login', $login, '/^[a-z][\\w-]*\\w$/i' ],
-			[ 'Control key', $control_key, '/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i' ],
-			[ 'End point Id', $endpoint, '/^\d+$/' ]],
+			[ 'Control key', $control_key, '/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i' ]],
 			function($iter, $entry){ if (!preg_match($entry[2], $entry[1])) $iter[] = "{$entry[0]} has invalid format"; return $iter; },
 			[]);
 	}
