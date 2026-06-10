@@ -82,7 +82,7 @@ class Payneteasypayment extends PaymentModule {
 				self::__END_POINT(),
 				self::__INTEGRATION_METHOD() == 'direct',
 				self::__IS_MULTICURR() == 1,
-				self::__DEBUG_TRACE() + self::__DEBUG_FAKE());
+				Payneteasy\lib\Api::is_debug_mode() ? (self::__DEBUG_TRACE() + self::__DEBUG_FAKE()) : 0);
 		}
 
 		return self::$_Api;
@@ -116,9 +116,6 @@ class Payneteasypayment extends PaymentModule {
 			self::LIVE_DOMAIN_CHECKOUT('https://gate.payneteasy.com/');
 			self::SANDBOX_DOMAIN_CHECKOUT('https://sandbox.payneteasy.com/');
 		}
-
-		self::DEBUG_TRACE(0);
-		self::DEBUG_FAKE(0);
 
 		copy(_PS_MODULE_DIR_ .'payneteasypayment/views/img/status-pending.gif', _PS_IMG_DIR_ ."os/{$OrderState->id}.gif");
 
