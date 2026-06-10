@@ -170,7 +170,7 @@ class Api {
 			trace([ 'RESULT' => $action ], ' -- ');
 			trace($result, ' <- ');
 		}
-		
+
 		if ($result['type'] == 'validation-error')
 			throw new ApiException("Card processing returned error: '{$result['error-message']}'", $data, $result);
 

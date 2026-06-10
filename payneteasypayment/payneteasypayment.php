@@ -59,14 +59,14 @@ class Payneteasypayment extends PaymentModule {
 		$key = str_replace('__', '', str_replace(self::_CFG, '', $key), $want_value);
 		if (!in_array($key, self::_CFG_KEYS) && !in_array($key, self::_CFG_KEYS_HIDDEN))
 			throw new Exception("invalid config key; '$key'");
-		
+
 		if (!isset(self::$_cfg)) {
 			$cfg = Configuration::getMultiple(array_map(fn($k) => self::_CFG.$k, array_merge(self::_CFG_KEYS, self::_CFG_KEYS_HIDDEN)));
 
 			foreach ($cfg as $k => $v)
 				self::$_cfg[ str_replace(self::_CFG, '', $k) ] = $v;
 		}
-		
+
 		if (!empty($arg))
 			Configuration::updateValue(self::_CFG.$key, self::$_cfg[$key] = $arg[0]);
 
@@ -96,10 +96,10 @@ class Payneteasypayment extends PaymentModule {
 
 		$OrderState = new OrderState(self::__STATE_WAITING());
 		$OrderState->name = [];
-        
+
 		foreach (Language::getLanguages() as $language)
 			$OrderState->name[$language['id_lang']] = 'Awaiting for payment';
-        
+
 		$OrderState->send_email = false;
 		$OrderState->color = '#4169E1';
 		$OrderState->hidden = false;
@@ -131,14 +131,14 @@ class Payneteasypayment extends PaymentModule {
 				INDEX (`serial_number`),
 				INDEX (`merchant_order_id`)
 			) ENGINE=' ._MYSQL_ENGINE_ .' DEFAULT CHARSET=utf8');
-        
+
 		return parent::install()
 			&& $this->registerHook('paymentOptions')
 			&& $this->registerHook('actionOrderStatusPostUpdate')
 			&& $this->registerHook('displayOrderConfirmation')
 			&& $this->registerHook('displayPaymentReturn');
 	}
-    
+
 	public function uninstall() {
 		$OrderState = new OrderState(self::__STATE_WAITING());
 		unlink(_PS_IMG_DIR_ ."os/{$OrderState->id}.gif");
@@ -153,7 +153,7 @@ class Payneteasypayment extends PaymentModule {
 			&& $this->unregisterHook('displayPaymentReturn')
 			&& parent::uninstall();
 	}
-    
+
 	public function getContent() {
 		$output = $this->context->smarty->fetch($this->local_path . 'views/templates/admin/configure.tpl');
 
@@ -261,7 +261,7 @@ class Payneteasypayment extends PaymentModule {
 						'options' => [
 							'name' => 'name',
 							'id' => 'id_order_state',
-							'query' => $orderStates ] ] ], 
+							'query' => $orderStates ] ] ],
 				'submit' => [ 'title' => $this->l('Save') ]  ] ];
 
 			if (Payneteasy\lib\Api::is_debug_mode()) {
@@ -374,7 +374,7 @@ class Payneteasypayment extends PaymentModule {
 
 		if (!Validate::isLoadedObject($Order) || $Order->module != $this->name)
 			return '';
-		
+
 		$transaction = '';
 
 		if ($Order->getOrderPaymentCollection()->count()) {
