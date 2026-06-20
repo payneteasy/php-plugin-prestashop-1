@@ -21,7 +21,7 @@ class Payneteasypayment extends PaymentModule {
 	public function __construct() {
 		$this->name = 'payneteasypayment';
 		$this->tab = 'payments_gateways';
-		$this->version = '1.4.1';
+		$this->version = '1.4.2';
 		$this->author = 'Payneteasy';
 		$this->module_key = '';
 		$this->ps_versions_compliancy = [ 'min' => '1.7.0.0', 'max' => '9.0.2' ];
