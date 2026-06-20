@@ -76,17 +76,17 @@ namespace Payneteasy {
 			foreach ($extra_inner as $k)
 				$this->cfg[ $this->allowed_key($k, true) ] = [ '', null, null, self::INNER ];
 
-			$loaded = unserialize($on_load(self::NAME) ?: '');
+			$loaded = @unserialize($on_load(self::NAME) ?: '');
 			if (is_array($loaded))
 				foreach ($loaded as $k => $v)
 					$this->cfg[$k][0] = $v;
 		}
 
-		public function __get(string $k): mixed
+		public function __get(string $k)
 			{ return $this->cfg[ $this->allowed_key($k) ][0] ?? ''; }
 
-		public function __set(string $k, string $v): void {
-			if ($force_save = str_ends_with($k, '_save'))
+		public function __set(string $k, string $v) {
+			if ($force_save = strpos($k, '_save'))
 				$k = str_replace('_save', '', $k);
 
 			if (null != ($re = ($this->cfg[ $this->allowed_key($k) ][1] ?? null)))
@@ -130,7 +130,7 @@ namespace Payneteasy {
 		public function form_values(): array
 			{ return array_reduce(array_map(fn($k) => ($this->cfg[$k][3] ?? false) ? [] : [ $this->form_name_prefix .$k => $this->cfg[$k][0] ], array_keys($this->cfg)), 'array_merge', []); }
 
-		public function form_save(callable $on_fetch, mixed &$has_changes): array {
+		public function form_save(callable $on_fetch, &$has_changes): array {
 			$errors = [];
 
 			foreach ($this->cfg as $k => $v)
