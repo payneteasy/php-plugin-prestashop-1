@@ -17,7 +17,7 @@ class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontControll
 		if (!$Cart->id)
 			Tools::redirect('index.php?controller=order&step=1');
 
-		$this->module->validateOrder($Cart->id, Payneteasypayment::__STATE_WAITING(), $Cart->getOrderTotal(), $this->module->displayName, null, array(), $Cart->id_currency, false, $Cart->secure_key);
+		$this->module->validateOrder($Cart->id, Payneteasypayment::Cfg()->STATE_WAITING, $Cart->getOrderTotal(), $this->module->displayName, null, array(), $Cart->id_currency, false, $Cart->secure_key);
 
 		$order_id = method_exists('Order', 'getIdByCartId') ? Order::getIdByCartId($Cart->id) : Order::getOrderByCartId($Cart->id);
 
@@ -57,7 +57,7 @@ class PayneteasypaymentRedirectModuleFrontController extends ModuleFrontControll
 		$Address = new Address($Cart->id_address_delivery);
 
 		$_fn_Url = fn($type='confirmation') => $this->context->link->getModuleLink('payneteasypayment', $type, [ 'order_id' => $order_id, 'secure_key' => $Cart->secure_key ], true);
-		
+
 		$data = [
 			'client_orderid' => $order_id,
 			'order_desc' => $this->module->l('Order on ') . Configuration::get('PS_SHOP_NAME'),

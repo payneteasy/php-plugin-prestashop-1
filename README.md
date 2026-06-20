@@ -1,9 +1,8 @@
-# php-plugin-prestashop-1
+# Plugin for Prestashop
 
-Plugin for prestashop version 1.7 and above.  
-Last tests was on versions 9.0.2, 8.2.3, 1.7.8.11.
+Tested on versions 9.0.2, 8.2.3, 1.7.8.11.
 
-# installation and configuration
+# Installation and configuration
 
 1. In admin section "Improve" click "Module Manager" 
 2. Then "Upload a module"
