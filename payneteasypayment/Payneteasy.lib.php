@@ -49,57 +49,68 @@ namespace Payneteasy {
 	}
 
 	class PneConfig {
-		private const NAME = 'PAYNETEASY_CFG';
+		private const HIDDEN = true;
 
-		private const INNER = true; # these values are not shown in admin form
-
-		private string $form_name_prefix;
 		private bool $changed = false;
-		private $on_save, $on_uninstall, $cfg = [
+		private $on_save, $on_input_key, $on_uninstall, $cfg = [
+			# [ value, regexp, shown name, is_hidden  ]
 			'LIVE_URL' => [ '', '|^https?://(?:\\w+(?:-\\w+)*\\.)+\\w+/$|', 'Gateway URL' ],
 			'SANDBOX_URL' => [ '', '|^https?://(?:\\w+(?:-\\w+)*\\.)+\\w+/$|', 'Sandbox URL' ],
 			'END_POINT' => [ '', '/^\d+$/', 'End point Id' ],
 			'LOGIN' => [ '', '/^[a-z][\\w-]*\\w$/i', 'Login' ],
 			'CONTROL_KEY' => [ '', '/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i', 'Control key' ],
-			'IS_MULTICURR' => [ '' ],
-			'IS_SANDBOX' => [ '' ],
-			'INTEGRATION' => [ '' ],
+			'IS_MULTICURR' => [ '0' ],
+			'IS_LIVE' => [ '0' ],
+			'IS_FORM' => [ '0' ],
+			'IS_SSN_REQUIRED' => [ '0' ],
 			'DEBUG_TRACE' => [ '' ],
 			'DEBUG_FAKE' => [ '' ] ];
 
-		public function __construct(callable $on_load, callable $on_save, callable $on_uninstall, array $extra=[], array $extra_inner=[], string $form_prefix='PAYNETEASY_') {
-			[ $this->on_save, $this->on_uninstall, $this->form_name_prefix ]  = [ $on_save, $on_uninstall, $form_prefix ];
+		private function __construct() {}
+
+		# config storage mostly handled by environment, so need only key fetches for mapping
+		public static function fetchkey_only(callable $on_fetch_key): PneConfig {
+			$new = new self();
+
+			foreach (array_keys($new->cfg) as $k)
+				$new->cfg[$k][0] = (string)$on_fetch_key($k);
+
+			return $new;
+		}
+
+		# config storage weakly handled by environment
+		public static function handler(callable $on_load, callable $on_save, callable $on_input_key, callable $on_uninstall, array $extra=[], array $hidden=[]): PneConfig {
+			$new = new self();
+
+			[ $new->on_save, $new->on_input_key, $new->on_uninstall ]  = [ $on_save, $on_input_key, $on_uninstall ];
 
 			foreach ($extra as $k)
-				$this->cfg[ $this->allowed_key($k, true) ] = [ '' ];
+				$new->cfg[ $new->allowed_key($k, true) ] = [ '' ];
 
-			foreach ($extra_inner as $k)
-				$this->cfg[ $this->allowed_key($k, true) ] = [ '', null, null, self::INNER ];
+			foreach ($hidden as $k)
+				$new->cfg[ $new->allowed_key($k, true) ] = [ '', null, null, self::HIDDEN ];
 
-			$loaded = @unserialize($on_load(self::NAME) ?: '');
+			$loaded = @unserialize($on_load() ?: '');
 			if (is_array($loaded))
 				foreach ($loaded as $k => $v)
-					$this->cfg[$k][0] = $v;
+					$new->cfg[$k][0] = $v;
+
+			return $new;
 		}
 
 		public function __get(string $k)
 			{ return $this->cfg[ $this->allowed_key($k) ][0] ?? ''; }
 
 		public function __set(string $k, string $v) {
-			if ($force_save = strpos($k, '_save'))
-				$k = str_replace('_save', '', $k);
-
 			if (null != ($re = ($this->cfg[ $this->allowed_key($k) ][1] ?? null)))
 				if (!preg_match($re, $v))
 					throw new PneConfigException(($this->cfg[$k][2]) .' has invalid format', false);
 
 			if ($this->cfg[$k][0] != (string)$v)
 				[ $this->cfg[$k][0], $this->changed ] = [ (string)$v, true ];
-
-			if ($force_save)
-				$this->save();
 		}
 
+		# checks for existence or dups
 		private function allowed_key(string $k, bool $check_dup=false): string {
 			if ($check_dup == isset($this->cfg[$k]))
 				throw new PneConfigException(($check_dup ? 'duplicate' : 'inallowed') ." config key '$k'", true);
@@ -114,7 +125,7 @@ namespace Payneteasy {
 			foreach ($this->cfg as $k => $v)
 				$saving[$k] = $v[0];
 
-			($this->on_save)(self::NAME, serialize($saving));
+			($this->on_save)(serialize($saving));
 
 			$this->changed = false;
 
@@ -122,21 +133,21 @@ namespace Payneteasy {
 		}
 
 		public function uninstall(): void
-			{ ($this->on_uninstall)(self::NAME); }
+			{ ($this->on_uninstall)(); }
 
-		public function form_field_name($k): string
-			{ return $this->form_name_prefix .$this->allowed_key($k); }
+		public function form_keys(): array
+			{ return array_keys($this->cfg); }
 
 		public function form_values(): array
-			{ return array_reduce(array_map(fn($k) => ($this->cfg[$k][3] ?? false) ? [] : [ $this->form_name_prefix .$k => $this->cfg[$k][0] ], array_keys($this->cfg)), 'array_merge', []); }
+			{ return array_reduce(array_map(fn($k) => [ $k => $this->cfg[$k][0] ], array_keys($this->cfg)), 'array_merge', []); }
 
-		public function form_save(callable $on_fetch, &$has_changes): array {
+		public function save_input(&$has_changes): array {
 			$errors = [];
 
 			foreach ($this->cfg as $k => $v)
-				if (!($v[3] ?? false))
+				if (!($v[3] ?? false)) # skip HIDDENs
 					try
-						{ $this->$k = ($on_fetch( $this->form_field_name($k) ) ?: ''); }
+						{ $this->$k = (string)($this->on_input_key)($k); }
 					catch (PneConfigException $E)
 						{ $errors[] = $E->getMessage(); }
 
@@ -144,26 +155,33 @@ namespace Payneteasy {
 
 			return $errors;
 		}
+
+		public function value_error($k, $v): string {
+			if (isset($this->cfg[$k]) && null != ($re = ($this->cfg[$k][1] ?? null)))
+				if (!preg_match($re, $v))
+					return $this->cfg[$k][2] .' has invalid format';
+
+			return '';
+		}
 	}
 
 	class PneApi {
 		private const URL = 'paynet/api/v2/';
 		private const USERAGENT = 'Payneteasy-Client/2.0';
 
-		private const DEBUG_MODE = false; # this is used to show admin controls (or do SetEnv DEBUG_MODE 1)
+		private const DEBUG_MODE = false; # this is used to show admin controls (or do SetEnv DEBUG_MODE 1) in devel environment
 
 		# these are debug mode flags in admin section
 		public const DEBUG_TRACE_REQUESTS = 0b01;
 		public const DEBUG_FAKE_REQUESTS = 0b10;
 
 		private string $gate, $login, $control_key, $endpoint;
-		private bool $is_direct, $is_multicurr;
+		private bool $is_form, $is_multicurr;
 		private int $debug_flags;
 
 		public function __construct(PneConfig $Cfg) {
-			[ $this->gate, $this->debug_flags ] = [ $Cfg->IS_SANDBOX ? $Cfg->SANDBOX_URL : $Cfg->LIVE_URL, self::is_debug_mode() ? ((int)$Cfg->DEBUG_TRACE + (int)$Cfg->DEBUG_FAKE) : 0 ];
-			[ $this->login, $this->control_key, $this->endpoint, $this->is_direct, $this->is_multicurr ]
-				= [ $Cfg->LOGIN, $Cfg->CONTROL_KEY, $Cfg->END_POINT, $Cfg->INTEGRATION == 'direct', $Cfg->IS_MULTICURR == 1 ];
+			[ $this->gate, $this->debug_flags ] = [ $Cfg->IS_LIVE ? $Cfg->LIVE_URL : $Cfg->SANDBOX_URL, self::is_debug_mode() ? ((int)$Cfg->DEBUG_TRACE + (int)$Cfg->DEBUG_FAKE) : 0 ];
+			[ $this->login, $this->control_key, $this->endpoint, $this->is_form, $this->is_multicurr ] = [ $Cfg->LOGIN, $Cfg->CONTROL_KEY, $Cfg->END_POINT, (bool)$Cfg->IS_FORM, (bool)$Cfg->IS_MULTICURR ];
 		}
 
 		public static function is_debug_mode(): bool
@@ -208,11 +226,11 @@ namespace Payneteasy {
 			return $test['status'] == 'approved';
 		}
 
-		public function is_direct(): bool
-			{ return $this->is_direct; }
+		public function is_form(): bool
+			{ return (bool)$this->is_form; }
 
 		public function sale(array $data): array
-			{ return $this->execute($this->is_direct ? 'sale' : 'sale-form', $this->signed($data)); }
+			{ return $this->execute($this->is_form ? 'sale-form' : 'sale', $this->signed($data)); }
 
 		public function return(array $data): array
 			{ return $this->execute('return', $this->signed($data, null, true)); }
@@ -256,7 +274,7 @@ namespace Payneteasy {
 				CURLOPT_RETURNTRANSFER	=> 1,
 				CURLOPT_POSTFIELDS			=> http_build_query($data) ]);
 
-			if ($this->is_debug_mode())
+			if (self::is_debug_mode())
 				curl_setopt($Curl, CURLOPT_CONNECTTIMEOUT, 10);
 
 			$response = curl_exec($Curl);
