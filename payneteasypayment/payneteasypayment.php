@@ -24,7 +24,7 @@ class Payneteasypayment extends PaymentModule {
 	public function __construct() {
 		$this->name = 'payneteasypayment';
 		$this->tab = 'payments_gateways';
-		$this->version = '1.4.3';
+		$this->version = '1.5.0';
 		$this->author = 'Payneteasy';
 		$this->module_key = '';
 		$this->ps_versions_compliancy = [ 'min' => '1.7.0.0', 'max' => '9.0.2' ];
@@ -94,17 +94,17 @@ class Payneteasypayment extends PaymentModule {
 		
 		self::Cfg()->save();
 
-		copy(_PS_MODULE_DIR_ .'payneteasypayment/views/img/status-pending.gif', _PS_IMG_DIR_ ."os/{$OrderState->id}.gif");
+		copy(_PS_MODULE_DIR_.'payneteasypayment/views/img/status-pending.gif', _PS_IMG_DIR_."os/{$OrderState->id}.gif");
 
 		Db::getInstance()->Execute('
-			CREATE TABLE IF NOT EXISTS `' ._DB_PREFIX_ .'payneteasy_payments` (
+			CREATE TABLE IF NOT EXISTS `'._DB_PREFIX_.'payneteasy_payments` (
 				`serial_number` varchar(255) NOT NULL,
 				`paynet_order_id` int(20) unsigned NOT NULL,
 				`merchant_order_id` int(20) unsigned,
 				PRIMARY KEY (`paynet_order_id`),
 				INDEX (`serial_number`),
 				INDEX (`merchant_order_id`)
-			) ENGINE=' ._MYSQL_ENGINE_ .' DEFAULT CHARSET=utf8');
+			) ENGINE='._MYSQL_ENGINE_.' DEFAULT CHARSET=utf8');
 
 		return parent::install()
 			&& $this->registerHook('paymentOptions')
@@ -115,7 +115,7 @@ class Payneteasypayment extends PaymentModule {
 
 	public function uninstall() {
 		$OrderState = new OrderState(self::Cfg()->STATE_WAITING_ID);
-		unlink(_PS_IMG_DIR_ ."os/{$OrderState->id}.gif");
+		unlink(_PS_IMG_DIR_."os/{$OrderState->id}.gif");
 		$OrderState->delete();
 
 		self::Cfg()->uninstall();
@@ -141,9 +141,12 @@ class Payneteasypayment extends PaymentModule {
 		else
 			$output .= '<br />';
 
+		$this->context->controller->addJS($this->_path . 'views/js/admin_settings.js');
+		Media::addJsDef([ 'pneAdminSettings' => [ 'row_selector' => '.form-group' ] ]);
+
 		$this->context->smarty->assign('module_dir', $this->_path);
 
-		return $output .$this->renderForm();
+		return $output.$this->renderForm();
 	}
 
 	public function renderForm() {
@@ -157,7 +160,7 @@ class Payneteasypayment extends PaymentModule {
 
 		$Helper->identifier = $this->identifier;
 		$Helper->submit_action = 'submitPayneteasypaymentModule';
-		$Helper->currentIndex = $this->context->link->getAdminLink('AdminModules', false) ."&configure={$this->name}&tab_module={$this->tab}&module_name={$this->name}";
+		$Helper->currentIndex = $this->context->link->getAdminLink('AdminModules', false)."&configure={$this->name}&tab_module={$this->tab}&module_name={$this->name}";
 		$Helper->token = Tools::getAdminTokenLite('AdminModules');
 
 		$Helper->tpl_vars = [
@@ -173,57 +176,88 @@ class Payneteasypayment extends PaymentModule {
 		$default_order_state = [[ 'id_order_state' => '0', 'name' => $this->l('Select')]];
 		$orderStates = array_merge($default_order_state, $orderStates);
 
+		$hidden[self::Cfg()->IS_LIVE ? 'SANDBOX' : 'LIVE'] = $hidden[self::Cfg()->IS_MULTICURR ? 'SINGLE' : 'MULTI'] = ' style="display:none"';
+		$endpointid_label = self::Cfg()->IS_MULTICURR ? 'Endpoint Group ID' : 'Endpoint ID';
+
 		$arr = [
 			'form' => [
 				'legend' => [ 'title' => $this->l('Settings'), 'icon' => 'icon-cogs' ],
 				'input' => [
-					[ 'type' => 'text',
-						'label' => $this->l('Gateway URL (LIVE)'),
-						'name' => 'LIVE_URL',
-						'desc' => $this->l('e.g. https://gate.payneteasy.com/') ],
-					[ 'type' => 'text',
-						'label' => $this->l('Gateway URL (SANDBOX)'),
-						'name' => 'SANDBOX_URL',
-						'desc' => $this->l('e.g. https://sandbox.payneteasy.com/') ],
-					[ 'type' => 'switch',
-						'label' => $this->l('Mode'),
-						'name' => 'IS_LIVE',
-						'desc' => $this->l('Sandbox or Live'),
-						'values' => [
-								[ 'id' => 'live_on', 'value' => 1, 'label' => $this->l('Live') ],
-								[ 'id' => 'live_off', 'value' => 0, 'label' => $this->l('Sandbox') ] ] ],
-					[ 'type' => 'switch',
-						'label' => $this->l('Integration method'),
-						'name' => 'IS_FORM',
-						'desc' => $this->l('Direct or Form'),
-						'values' => [
-								[ 'id' => 'form', 'value' => 1, 'label' => $this->l('Form') ],
-								[ 'id' => 'direct', 'value' => 0, 'label' => $this->l('Direct') ] ] ],
-					[ 'type' => 'text',
-						'label' => $this->l('End point Id'),
-						'name' => 'END_POINT',
-						'desc' => $this->l('End point Id'),
-						'required' => true ],
-					[ 'type' => 'switch',
+					[ 'type' => 'checkbox',
+						'name' => 'IS',
+						'label' => $this->l('Live mode'),
+						'desc' => sprintf('<span id="pne_is_live_desc_off">%s</span><span id="pne_is_live_desc_on">%s</span>',
+							$this->l('Sandbox mode is on'),
+							$this->l('Live mode is on')),
+						'values' => [ 'id' => 'id', 'name' => 'label',
+							'query' => [ [ 'id' => 'LIVE', 'label' => $this->l('Enable live mode') ] ] ] ],
+					[ 'type' => 'checkbox',
+						'name' => 'IS',
 						'label' => $this->l('Multiple currencies'),
-						'name' => 'IS_MULTICURR',
-						'desc' => $this->l('End point Id supports multiple currencies'),
-						'values' => [
-								[ 'id' => 'multicurr_on', 'value' => 1, 'label' => $this->l('Yes') ],
-								[ 'id' => 'multicurr_off', 'value' => 0, 'label' => $this->l('No') ] ] ],
+						'desc' => sprintf('<span class="pne_is_multi_off">%s</span><span class="pne_is_multi_on">%s</span>',
+							$this->l('Single currency mode'),
+							$this->l('Multicurrency mode')),
+						'values' => [ 'id' => 'id', 'name' => 'label',
+							'query' => [ [ 'id' => 'MULTICURR', 'label' => $this->l('Support multiple currencies') ] ] ] ],
 					[ 'type' => 'text',
+						'name' => 'SANDBOX_URL',
+						'label' => $this->l('Gateway URL (SANDBOX)'),
+						'desc' => $this->l('Sandbox\'s API URL, e.g. https://sandbox.payneteasy.com/'),
+						'placeholder' => $this->l('Enter sandbox url'),
+						'required' => true ],
+					[ 'type' => 'text',
+						'name' => 'SANDBOX_END_POINT',
+						'label' => sprintf('<span class="pne_is_multi pne_endpointid_label">%s</span>', $this->l($endpointid_label)),
+						'desc' => sprintf('<span class="pne_endpointid_label">%s</span>', $this->l("Sandbox's $endpointid_label is required to call the API")),
+						'placeholder' => $this->l('Enter sandbox Endpoint ID or Endpoint Group ID'),
+						'required' => true ],
+					[ 'type' => 'text',
+						'name' => 'SANDBOX_LOGIN',
 						'label' => $this->l('Login'),
-						'name' => 'LOGIN',
+						'desc' => $this->l('Sandbox\'s Login is required to call the API'),
+						'placeholder' => $this->l('Enter sandbox Login'),
 						'required' => true ],
 					[ 'type' => 'text',
+						'name' => 'SANDBOX_CONTROL_KEY',
 						'label' => $this->l('Control key'),
-						'name' => 'CONTROL_KEY',
+						'desc' => $this->l('Sandbox\'s Control key is required to call the API'),
+						'placeholder' => $this->l('Enter sandbox Control key'),
 						'required' => true ],
+					[ 'type' => 'text',
+						'name' => 'LIVE_URL',
+						'label' => $this->l('Gateway URL (LIVE)'),
+						'desc' => $this->l('Merchant\'s API URL, e.g. https://gate.payneteasy.com/'),
+						'placeholder' => $this->l('Enter live url'),
+						'required' => true ],
+					[ 'type' => 'text',
+						'name' => 'LIVE_END_POINT',
+						'label' => sprintf('<span class="pne_is_multi pne_endpointid_label">%s</span>', $this->l($endpointid_label)),
+						'desc' => sprintf('<span class="pne_endpointid_label">%s</span>', $this->l("Merchant's $endpointid_label is required to call the API")),
+						'placeholder' => $this->l('Enter live Endpoint ID or Endpoint Group ID'),
+						'required' => true ],
+					[ 'type' => 'text',
+						'name' => 'LIVE_LOGIN',
+						'label' => $this->l('Login'),
+						'desc' => $this->l('Merchant\'s Login is required to call the API'),
+						'placeholder' => $this->l('Enter live Login'),
+						'required' => true ],
+					[ 'type' => 'text',
+						'name' => 'LIVE_CONTROL_KEY',
+						'label' => $this->l('Control key'),
+						'desc' => $this->l('Merchant\'s Control key is required to call the API'),
+						'placeholder' => $this->l('Enter live Control key'),
+						'required' => true ],
+					[ 'type' => 'checkbox',
+						'name' => 'IS',
+						'label' => $this->l('Integration method'),
+						'desc' => $this->l('Direct or Form'),
+						'values' => [ 'id' => 'id', 'name' => 'label',
+							'query' => [ [ 'id' => 'FORM', 'label' => $this->l('Form') ] ] ] ],
 					[ 'type' => 'select',
-						'label' => $this->l('Cancel order state for refund'),
 						'name' => 'CANCEL_STATE',
-						'desc' => $this->l('Select the order status for automatic refund'),
 						'id' => 'CANCEL_STATE',
+						'label' => $this->l('Cancel order state for refund'),
+						'desc' => $this->l('Select the order status for automatic refund'),
 						'options' => [
 							'name' => 'name',
 							'id' => 'id_order_state',
@@ -233,19 +267,19 @@ class Payneteasypayment extends PaymentModule {
 			if (PneApi::is_debug_mode()) {
 				array_push($arr['form']['input'],
 					[ 'type' => 'switch',
-						'label' => $this->l('DEBUG: Trace requests'),
 						'name' => 'DEBUG_TRACE',
+						'label' => $this->l('DEBUG: Trace requests'),
 						'desc' => $this->l('Debug flag: write requests and responses trace to server errorlog'),
 						'values' => [
-								[ 'id' => 'trace_off', 'value' => 0, 'label' => $this->l('Off') ],
-								[ 'id' => 'trace_on', 'value' => PneApi::DEBUG_TRACE_REQUESTS, 'label' => $this->l('On') ] ] ],
+								[ 'id' => 'trace_on', 'value' => PneApi::DEBUG_TRACE_REQUESTS, 'label' => $this->l('On') ],
+								[ 'id' => 'trace_off', 'value' => 0, 'label' => $this->l('Off') ] ] ],
 					[ 'type' => 'switch',
-						'label' => $this->l('DEBUG: Fake requests'),
 						'name' => 'DEBUG_FAKE',
+						'label' => $this->l('DEBUG: Fake requests'),
 						'desc' => $this->l('Debug flag: imitate server requests and responses (countermands responses trace)'),
 						'values' => [
-								[ 'id' => 'fake_off', 'value' => 0, 'label' => $this->l('Off') ],
-								[ 'id' => 'fake_on', 'value' => PneApi::DEBUG_FAKE_REQUESTS, 'label' => $this->l('On') ] ] ]);
+								[ 'id' => 'fake_on', 'value' => PneApi::DEBUG_FAKE_REQUESTS, 'label' => $this->l('On') ],
+								[ 'id' => 'fake_off', 'value' => 0, 'label' => $this->l('Off') ] ] ]);
 			}
 
 			return $arr;
@@ -281,7 +315,7 @@ class Payneteasypayment extends PaymentModule {
 			'expiry_year_value'     => $year,
 			'expiry_month_value'    => $mon,
 			'printed_name_value'    => $name,
-			'cvv_image'             => Media::getMediaPath( _PS_MODULE_DIR_ ."{$this->name}/views/img/cvv-image.png")]);
+			'cvv_image'             => Media::getMediaPath(_PS_MODULE_DIR_."{$this->name}/views/img/cvv-image.png")]);
 
 		$this->context->smarty->assign([ 'action' => $this->context->link->getModuleLink($this->name, 'redirect', [ 'option' => 'embedded' ], true) ]);
 
@@ -343,7 +377,7 @@ class Payneteasypayment extends PaymentModule {
 
 			if ($OrderState->id == self::Cfg()->CANCEL_STATE)
 				$response = self::Api()->return([ 'client_orderid' => $Order->id, 'comment' => $this->l('Order cancel'),
-					'orderid' => $Db::getInstance()->getValue('SELECT paynet_order_id FROM `' ._DB_PREFIX_ ."payneteasy_payments` WHERE merchant_order_id={$Order->id}") ]);
+					'orderid' => $Db::getInstance()->getValue('SELECT paynet_order_id FROM `'._DB_PREFIX_."payneteasy_payments` WHERE merchant_order_id={$Order->id}") ]);
 		}
 	}
 

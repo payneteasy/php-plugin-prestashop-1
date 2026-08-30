@@ -1,5 +1,5 @@
 Deny from all
 
-<FilesMatch "\.(gif|jpe?g|png)$">
+<FilesMatch "\.(gif|jpe?g|png|js)$">
 	Allow from all
 </FilesMatch>
